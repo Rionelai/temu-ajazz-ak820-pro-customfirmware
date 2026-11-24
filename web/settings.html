@@ -1,0 +1,320 @@
+<!doctype html>
+<html lang="en">
+<!-- AK820 Pro settings page: ONE self-contained file (no other files, no internet needed).
+     Open it in Chrome or Edge (WebHID). Works with keyboards running the revived firmware. -->
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AK820 Pro Settings</title>
+<style>
+  :root { --bg: #f6f5f1; --fg: #1f1e1c; --muted: #6b6963; --card: #fff; --line: #dedbd3; --acc: #c96442; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #1d1c1a; --fg: #ecebe6; --muted: #a09d95; --card: #262523; --line: #3a3835; --acc: #d97757; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.45 system-ui, sans-serif; }
+  main { max-width: 640px; margin: 0 auto; padding: 24px 16px 60px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h2 { font-size: 15px; margin: 0 0 12px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin: 14px 0; }
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 7px 0; }
+  .row label { flex: 1; }
+  .row output { min-width: 4.5em; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+  input[type=range] { flex: 1.4; accent-color: var(--acc); }
+  input[type=checkbox] { width: 20px; height: 20px; accent-color: var(--acc); }
+  select, input[type=number] { font: inherit; padding: 5px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); }
+  input[type=number] { width: 6em; }
+  input[type=color] { width: 56px; height: 32px; border: 1px solid var(--line); border-radius: 6px; background: none; padding: 2px; }
+  button { font: inherit; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); cursor: pointer; }
+  button.primary { background: var(--acc); border-color: var(--acc); color: #fff; font-weight: 600; }
+  button:disabled { opacity: .5; cursor: default; }
+  .muted { color: var(--muted); }
+  #status { margin-left: 10px; }
+  .info { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; }
+  .info div { background: var(--bg); border-radius: 8px; padding: 8px 10px; }
+  .info b { display: block; font-size: 18px; }
+  fieldset { border: 0; padding: 0; margin: 0; }
+  fieldset:disabled { opacity: .45; }
+  .btns { display: flex; flex-wrap: wrap; gap: 8px; }
+  .presets { display: grid; grid-template-columns: repeat(auto-fit, minmax(105px, 1fr)); gap: 8px; margin-bottom: 10px; }
+  .presets button { padding: 10px 6px; }
+  .presets button.on { border-color: var(--acc); color: var(--acc); font-weight: 600; }
+  progress { width: 60%; accent-color: var(--acc); }
+</style>
+</head>
+<body>
+<main>
+  <h1>AK820 Pro</h1>
+  <p class="muted">Settings for the revived firmware. Chrome or Edge, over the USB cable or Bluetooth
+    (image upload: use the cable, it is much faster).</p>
+  <p><button class="primary" id="connect">Connect keyboard</button><span id="status" class="muted">not connected</span></p>
+
+  <fieldset id="ui" disabled>
+  <div class="card">
+    <h2>Keyboard</h2>
+    <div class="info">
+      <div>Firmware<b id="i-fw">-</b></div>
+      <div>Battery<b id="i-bat">-</b></div>
+      <div>USB power<b id="i-usb">-</b></div>
+      <div>Screen chip<b id="i-scr">-</b></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Lighting</h2>
+    <div class="row"><label for="on">Lights on</label><input type="checkbox" id="on"></div>
+    <div class="row"><label for="mode">Effect</label>
+      <select id="mode"><option value="0">Static</option><option value="1">Breathing</option><option value="2">Spectrum</option><option value="3">Wave</option></select></div>
+    <div class="row"><label for="color">Colour</label><input type="color" id="color"></div>
+    <div class="row"><label for="bri">Brightness</label><input type="range" id="bri" min="0" max="150"><output id="bri-o"></output></div>
+    <div class="row"><label for="spd">Speed</label><input type="range" id="spd" min="0" max="4"><output id="spd-o"></output></div>
+    <div class="row"><label for="dir">Reverse direction</label><input type="checkbox" id="dir"></div>
+  </div>
+
+  <div class="card">
+    <h2>Keys</h2>
+    <div class="row"><label for="winlock">Win key lock</label><input type="checkbox" id="winlock"></div>
+  </div>
+
+  <div class="card">
+    <h2>Power</h2>
+    <div class="row"><label for="idle">Lights off after (minutes, 0 = never)</label><input type="number" id="idle" min="0" max="120"></div>
+    <div class="row"><label for="sleep">Sleep on battery after (minutes, 0 = never)</label><input type="number" id="sleep" min="0" max="240"></div>
+  </div>
+
+  <div class="card">
+    <h2>Screen</h2>
+    <div class="presets" id="presets"></div>
+    <div class="row"><label for="scr">Backlight on</label><input type="checkbox" id="scr"></div>
+    <div class="row"><label for="rot">Rotation</label>
+      <select id="rot"><option value="0">0°</option><option value="1">90°</option><option value="2">180°</option><option value="3">270°</option></select></div>
+    <div class="row"><label>Own image / GIF</label>
+      <span class="btns"><input type="file" id="file" accept="image/*" hidden><button id="upload">Upload image / GIF</button></span></div>
+    <div id="up" hidden><progress id="up-bar" max="1" value="0"></progress> <span id="up-t" class="muted"></span></div>
+    <p class="muted">Clock time: Tbilisi (Georgia), set from this PC every time you connect. Images are scaled
+      to 128×128; GIFs keep up to 32 frames (longer ones: 32 frames spread evenly over the GIF, same speed); about 2 s upload per frame - keep the cable in.</p>
+  </div>
+  </fieldset>
+</main>
+<script>
+// AK820 Pro settings page: talks to the keyboard's vendor HID interface (firmware/keyboard/config.c).
+const $ = id => document.getElementById(id);
+const FIELDS = ['on', 'mode', 'r', 'g', 'b', 'bri', 'spd', 'dir', 'winlock', 'idle_min', 'sleep_min', 'scr_bl', 'scr_mode', 'scr_rot'];
+const PRESETS = ['Clock', 'Claude logo', 'Analog clock', 'Status', 'Typing speed', 'Matrix rain', 'Plasma', 'Starfield', 'Game of life', 'Own image / GIF'];
+let dev = null, rid = 0, waiting = null, queue = Promise.resolve(), saveTimer = 0, scrMode = 1, busy = false;
+
+function status(t) { $('status').textContent = t; }
+
+// one request at a time: send 64 bytes, wait for the 64-byte answer with the same command
+function request(bytes, timeout = 1500) {
+  const run = () => new Promise((resolve, reject) => {
+    const buf = new Uint8Array(64); buf.set(bytes);
+    const t = setTimeout(() => { waiting = null; reject(new Error('no answer')); }, timeout);
+    waiting = a => { if (a[0] !== bytes[0]) return; clearTimeout(t); waiting = null; resolve(a); };
+    dev.sendReport(rid, buf).catch(e => { clearTimeout(t); waiting = null; reject(e); });
+  });
+  const p = queue.then(run, run);
+  queue = p.catch(() => {});
+  return p;
+}
+
+// send without waiting for an answer (upload chunks), in order with request()
+function sendOnly(bytes) {
+  const run = () => { const buf = new Uint8Array(64); buf.set(bytes); return dev.sendReport(rid, buf); };
+  const p = queue.then(run, run);
+  queue = p.catch(() => {});
+  return p;
+}
+
+const hex = (r, g, b) => '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('');
+const unhex = h => [1, 3, 5].map(i => parseInt(h.substr(i, 2), 16));
+
+function show(c) {
+  $('on').checked = !!c.on; $('mode').value = c.mode; $('color').value = hex(c.r, c.g, c.b);
+  $('bri').value = c.bri; $('bri-o').textContent = Math.round(c.bri / 1.5) + ' %';
+  $('spd').value = c.spd; $('spd-o').textContent = c.spd + 1;
+  $('dir').checked = !c.dir; $('winlock').checked = !!c.winlock;
+  $('idle').value = c.idle_min; $('sleep').value = c.sleep_min; $('scr').checked = !!c.scr_bl;
+  $('rot').value = c.scr_rot; scrMode = c.scr_mode;
+  document.querySelectorAll('#presets button').forEach((b, i) => b.classList.toggle('on', i === scrMode));
+}
+function read() {
+  const [r, g, b] = unhex($('color').value);
+  const clamp = (v, hi) => Math.max(0, Math.min(hi, parseInt(v) || 0));
+  return { on: +$('on').checked, mode: +$('mode').value, r, g, b, bri: +$('bri').value, spd: +$('spd').value,
+           dir: $('dir').checked ? 0 : 1, winlock: +$('winlock').checked,
+           idle_min: clamp($('idle').value, 120), sleep_min: clamp($('sleep').value, 240), scr_bl: +$('scr').checked,
+           scr_mode: scrMode, scr_rot: +$('rot').value };
+}
+async function save() {
+  const c = read(); show(c);
+  try {
+    const a = await request([0x03, ...FIELDS.map(f => c[f])], 3000);
+    status(a[1] ? 'keyboard refused that value' : 'saved');
+  } catch (e) { status('error: ' + e.message); }
+}
+function changed() { clearTimeout(saveTimer); status('…'); saveTimer = setTimeout(save, 120); }
+
+// local time in Tbilisi as seconds since 2000-01-01 00:00 (Georgia: UTC+4, no daylight saving)
+function tbilisiSeconds() {
+  const p = {};
+  new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Tbilisi', hourCycle: 'h23', year: 'numeric', month: '2-digit',
+    day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }).formatToParts(new Date())
+    .forEach(x => p[x.type] = +x.value);
+  return (Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second) - Date.UTC(2000, 0, 1)) / 1000;
+}
+async function syncTime() {
+  const s = tbilisiSeconds();
+  await request([0x04, s & 255, (s >> 8) & 255, (s >> 16) & 255, (s >>> 24) & 255], 3000);
+}
+
+async function refreshInfo() {
+  const a = await request([0x01]);
+  $('i-fw').textContent = 'v' + a[3];
+  $('i-bat').textContent = a[4] + ' %';
+  $('i-usb').textContent = a[5] ? 'yes' : 'no';
+  $('i-scr').textContent = a[7] ? 'ok' : 'no answer';
+  const d = i => a[10 + 2 * i] | a[11 + 2 * i] << 8;
+  const u32 = o => (a[o] | a[o + 1] << 8 | a[o + 2] << 16 | a[o + 3] << 24) >>> 0;
+  $('i-scr').title = `knocks ok ${d(0)}, knocks failed ${d(1)}, frames answered ${d(2)}, last byte 0x${d(3).toString(16)}, `
+    + `SysTick measured ${(u32(18) / 1e6).toFixed(3)} MHz, clock driver says ${(u32(22) / 1e6).toFixed(3)} MHz`;
+  if (!a[7]) $('i-scr').textContent = `no answer (${d(0)}/${d(1)}/${d(2)}/${d(3).toString(16)})`;
+}
+
+async function connect() {
+  try {
+    // USB (report ID 0) or Bluetooth (report ID 3): both expose the same vendor collection
+    const list = await navigator.hid.requestDevice({ filters: [{ usagePage: 0xFF60, usage: 0x61 }] });
+    dev = list[0];
+    if (!dev) return;
+    if (!dev.opened) await dev.open();
+    const col = dev.collections.find(c => c.usagePage === 0xFF60);
+    rid = col && col.outputReports && col.outputReports[0] ? col.outputReports[0].reportId : 0;
+    dev.addEventListener('inputreport', e => { if (waiting) waiting(new Uint8Array(e.data.buffer)); });
+    await refreshInfo();
+    const a = await request([0x02]);
+    if (a[3] === undefined) throw new Error('bad answer');
+    const c = {}; FIELDS.forEach((f, i) => c[f] = a[2 + i]);
+    show(c);
+    $('ui').disabled = false;
+    status('connected');
+    syncTime().catch(() => {});
+  } catch (e) { status('error: ' + e.message); }
+}
+
+// ---------------------------------------------------------------- image / GIF upload
+const FRAME = 128 * 128 * 2, MAX_FRAMES = 32;    // the screen firmware could keep up to 120
+function toRGB565(canvas) {                   // big-endian RGB565, row by row
+  const d = canvas.getContext('2d').getImageData(0, 0, 128, 128).data, o = new Uint8Array(FRAME);
+  for (let i = 0, j = 0; i < d.length; i += 4, j += 2) {
+    const v = ((d[i] & 0xF8) << 8) | ((d[i + 1] & 0xFC) << 3) | (d[i + 2] >> 3);
+    o[j] = v >> 8; o[j + 1] = v & 255;
+  }
+  return o;
+}
+function drawCover(src, w, h) {               // scale to fill 128x128, crop the middle
+  const c = document.createElement('canvas'); c.width = c.height = 128;
+  const g = c.getContext('2d'), k = Math.max(128 / w, 128 / h);
+  g.fillStyle = '#000'; g.fillRect(0, 0, 128, 128);
+  g.imageSmoothingQuality = 'high';
+  g.drawImage(src, (128 - w * k) / 2, (128 - h * k) / 2, w * k, h * k);
+  return c;
+}
+async function decodeFrames(file) {
+  if ('ImageDecoder' in window && (file.type === 'image/gif' || file.type === 'image/webp' || file.type === 'image/png')) {
+    // whole file + wait for 'completed': with a stream, frameCount is only what has arrived so
+    // far (a GIF showed 2 frames)
+    const dec = new ImageDecoder({ data: await file.arrayBuffer(), type: file.type });
+    await dec.tracks.ready;
+    await dec.completed;
+    const total = dec.tracks.selectedTrack.frameCount || 1;
+    // pass 1: every frame's display time (ms)
+    const dur = [];
+    for (let i = 0; i < total; i++) {
+      const r = await dec.decode({ frameIndex: i });
+      dur.push(Math.max(20, (r.image.duration || 100000) / 1000)); r.image.close();
+      $('up-t').textContent = `reading timing ${i + 1} of ${total} …`;
+    }
+    // pass 2: pick frames. Up to MAX_FRAMES: all of them, own timing. More: MAX_FRAMES frames at
+    // evenly spaced moments of the GIF's running time, each shown for the same time -> smooth,
+    // and the loop lasts as long as the original.
+    const T = dur.reduce((a, b) => a + b, 0), out = [];
+    let pick;
+    if (total <= MAX_FRAMES) pick = dur.map((d, i) => ({ i, delay: d }));
+    else {
+      pick = [];
+      for (let k = 0; k < MAX_FRAMES; k++) {
+        const t = (k + 0.5) * T / MAX_FRAMES;            // middle of the k-th time slot
+        let i = 0, acc = dur[0];
+        while (acc <= t && i < total - 1) acc += dur[++i];
+        pick.push({ i, delay: T / MAX_FRAMES });
+      }
+    }
+    for (const p of pick) {
+      const { image } = await dec.decode({ frameIndex: p.i });
+      out.push({ px: toRGB565(drawCover(image, image.displayWidth, image.displayHeight)),
+                 delay: Math.min(65535, Math.max(20, Math.round(p.delay))) });
+      image.close();
+      $('up-t').textContent = `preparing frame ${out.length} of ${pick.length} …`;
+    }
+    dec.close();
+    return out;
+  }
+  const bmp = await createImageBitmap(file);
+  return [{ px: toRGB565(drawCover(bmp, bmp.width, bmp.height)), delay: 1000 }];
+}
+async function erase(addr) {
+  const a = await request([0x20, addr >> 16 & 255, addr >> 8 & 255, addr & 255], 3000);
+  if (a[1]) throw new Error('screen flash erase failed at 0x' + addr.toString(16));
+}
+async function writePage(addr, bytes) {       // 256-byte page in chunks of 56 (+ 32)
+  for (let off = 0; off < bytes.length; off += 56) {
+    const n = Math.min(56, bytes.length - off), last = off + n >= bytes.length;
+    const r = [0x21, addr >> 16 & 255, addr >> 8 & 255, addr & 255, off, n, last ? 1 : 0, 0, ...bytes.subarray(off, off + n)];
+    if (!last) { await sendOnly(r); continue; }     // the keyboard only answers a page's last chunk
+    const a = await request(r, 3000);
+    if (a[1]) throw new Error('screen flash write failed at page 0x' + addr.toString(16));
+  }
+}
+async function upload(file) {
+  if (busy) return;
+  busy = true; $('up').hidden = false; $('upload').disabled = true;
+  try {
+    const id = await request([0x22], 3000);
+    if (id[1] || id[2] !== 0x85) throw new Error('screen flash not found');
+    $('up-t').textContent = 'reading ' + file.name + ' …';
+    const frames = await decodeFrames(file);
+    const total = frames.length * 136 + 2; let done = 0;
+    const tick = () => { done++; $('up-bar').value = done / total; $('up-t').textContent = `frame ${Math.min(frames.length, 1 + Math.floor(done / 136))} of ${frames.length}`; };
+    await erase(0); tick();                    // header first: the screen shows nothing half-written
+    for (let f = 0; f < frames.length; f++) {
+      const base = 0x1000 + f * 0x8000;
+      for (let s = 0; s < 8; s++) { await erase(base + s * 4096); tick(); }
+      for (let p = 0; p < 128; p++) { await writePage(base + p * 256, frames[f].px.subarray(p * 256, p * 256 + 256)); tick(); }
+    }
+    const h = new Uint8Array(8 + 2 * frames.length);
+    h.set([65, 75, 73, 77, frames.length]);    // "AKIM", frame count
+    frames.forEach((fr, i) => { h[8 + 2 * i] = fr.delay & 255; h[9 + 2 * i] = fr.delay >> 8; });
+    await writePage(0, h); tick();
+    scrMode = 9; await save();
+    $('up-t').textContent = `done - ${frames.length} frame${frames.length > 1 ? 's' : ''} on the screen`;
+  } catch (e) { $('up-t').textContent = 'failed: ' + e.message; }
+  busy = false; $('upload').disabled = false;
+}
+
+// ---------------------------------------------------------------- wiring
+PRESETS.forEach((name, i) => {
+  const b = document.createElement('button'); b.textContent = name;
+  b.onclick = () => { scrMode = i; changed(); };
+  $('presets').appendChild(b);
+});
+if (!('hid' in navigator)) { status('this browser has no WebHID - use Chrome or Edge'); $('connect').disabled = true; }
+$('connect').onclick = connect;
+['on', 'mode', 'dir', 'winlock', 'scr', 'idle', 'sleep', 'rot'].forEach(id => $(id).addEventListener('change', changed));
+['color', 'bri', 'spd'].forEach(id => $(id).addEventListener('input', changed));
+$('upload').onclick = () => $('file').click();
+$('file').onchange = () => { const f = $('file').files[0]; $('file').value = ''; if (f) upload(f); };
+navigator.hid?.addEventListener('disconnect', e => { if (e.device === dev) { dev = null; $('ui').disabled = true; status('disconnected'); } });
+setInterval(() => { if (dev && !busy && !$('ui').disabled) refreshInfo().catch(() => {}); }, 10000);
+setInterval(() => { if (dev && !busy && !$('ui').disabled) syncTime().catch(() => {}); }, 600000);
+</script>
+</body>
+</html>
