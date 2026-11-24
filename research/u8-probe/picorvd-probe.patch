@@ -1,0 +1,325 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index c7f7726..12e4a48 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -30,7 +30,7 @@ add_executable(
+ pico_generate_pio_header(picorvd ${CMAKE_CURRENT_SOURCE_DIR}/src/singlewire.pio)
+ 
+ #target_compile_definitions(picorvd PRIVATE PICO_STDIO_USB_CONNECT_WAIT_TIMEOUT_MS=100) # wait for USB connect
+-target_compile_definitions(picorvd PRIVATE PARAM_ASSERTIONS_ENABLE_ALL=1)
++target_compile_definitions(picorvd PRIVATE PARAM_ASSERTIONS_ENABLE_ALL=1 io_bank0_hw=iobank0_hw)
+ 
+ if(INCLUDE_BLINKY_BINARY)
+     add_definitions(-DINCLUDE_BLINKY_BINARY)
+diff --git a/src/main.cpp b/src/main.cpp
+index af3d3fc..3382b83 100644
+--- a/src/main.cpp
++++ b/src/main.cpp
+@@ -1,4 +1,5 @@
+ #include <stdio.h>
++#include <string.h>
+ 
+ #include "pico/stdlib.h"
+ #include "tusb.h"
+@@ -76,6 +77,301 @@ int main() {
+     }
+     tud_task();
+ 
++    // Read-only probe mode: any byte from the host runs one probe and prints text.
++    // Never halts, erases or writes target flash; the GDB stub and console are skipped
++    // because the GDB stub's halt-on-connect hangs forever on a non-CH32V target.
++    if (tud_cdc_n_available(0)) {
++      char cmd;
++      tud_cdc_n_read(0, &cmd, 1);
++      char line[96];
++      auto say = [&](const char* s) {
++        // Flow-controlled: only queue what the CDC FIFO can take, so long dumps lose nothing.
++        uint32_t n = strlen(s);
++        while (n) {
++          uint32_t room = tud_cdc_n_write_available(0);
++          if (!room) { tud_task(); continue; }
++          uint32_t k = n < room ? n : room;
++          tud_cdc_n_write(0, s, k);
++          s += k; n -= k;
++          tud_cdc_n_write_flush(0);
++          tud_task();
++        }
++      };
++      auto halt_target = [&]() {
++        swio->put(0x10, 0x80000001);
++        bool h = false;
++        for (int i = 0; i < 200 && !h; i++) h = (swio->get(0x11) >> 9) & 1;
++        swio->put(0x10, 0x00000001);
++        return h;
++      };
++      auto resume_target = [&]() {
++        swio->put(0x10, 0x10000001);                 // ack havereset
++        swio->put(0x10, 0x40000001);                 // resumereq
++        bool ack = false;
++        for (int i = 0; i < 200 && !ack; i++) ack = (swio->get(0x11) >> 17) & 1;
++        swio->put(0x10, 0x00000001);
++        return ack;
++      };
++      auto abs_wait = [&]() {
++        uint32_t s = 0;
++        for (int i = 0; i < 100; i++) { s = swio->get(0x16); if (!((s >> 12) & 1)) break; }
++        return (s >> 8) & 7;
++      };
++      auto mem_rd = [&](uint32_t a, uint32_t& e) {
++        swio->put(0x16, 0x700); swio->put(0x05, a); swio->put(0x17, (2u << 24) | (2u << 20));
++        e = abs_wait(); return swio->get(0x04);
++      };
++      auto mem_wr = [&](uint32_t a, uint32_t v) {
++        swio->put(0x16, 0x700); swio->put(0x04, v); swio->put(0x05, a);
++        swio->put(0x17, (2u << 24) | (2u << 20) | (1u << 16));
++        return abs_wait();
++      };
++      if (cmd == 'L') {
++        // Load a program from the host into target SRAM at 0x20000400 and start it there.
++        // Host sends: 'L', uint16 little-endian length, then the bytes. Flash is never touched.
++        static uint8_t img[4096];
++        auto getb = [&](uint8_t& out) {
++          for (uint32_t t0 = time_us_32(); time_us_32() - t0 < 2000000;) {
++            if (tud_cdc_n_available(0)) { tud_cdc_n_read(0, &out, 1); return true; }
++            tud_task();
++          }
++          return false;
++        };
++        uint8_t lo = 0, hi = 0;
++        bool ok = getb(lo) && getb(hi);
++        uint32_t len = lo | (hi << 8);
++        if (!ok || len == 0 || len > sizeof(img)) { say("LOAD BADLEN\r\n"); say("END\r\n"); continue; }
++        for (uint32_t i = 0; i < len && ok; i++) ok = getb(img[i]);
++        if (!ok) { say("LOAD TIMEOUT\r\n"); say("END\r\n"); continue; }
++        swio->reset(PIN_SWIO);
++        bool h = halt_target();
++        uint32_t bad = 0;
++        for (uint32_t a = 0x20000300; a < 0x20000310; a += 4) mem_wr(a, 0);   // clear mailbox
++        for (uint32_t i = 0; i < len; i += 4) {
++          uint32_t w = 0;
++          for (uint32_t k = 0; k < 4 && i + k < len; k++) w |= (uint32_t)img[i + k] << (8 * k);
++          uint32_t e1 = mem_wr(0x20000400 + i, w), e2;
++          if (e1 || mem_rd(0x20000400 + i, e2) != w || e2) bad++;
++        }
++        // DPC = entry point, then resume: the core continues in our RAM code.
++        swio->put(0x16, 0x700); swio->put(0x04, 0x20000400);
++        swio->put(0x17, (2u << 20) | (1u << 17) | (1u << 16) | 0x7B1);
++        uint32_t edpc = abs_wait();
++        bool r = resume_target();
++        snprintf(line, sizeof(line), "LOADED %lu bytes halted %d verify_bad %lu dpc_err %lu resumed %d\r\n",
++                 (unsigned long)len, h, (unsigned long)bad, (unsigned long)edpc, r);
++        say(line);
++      }
++      if (cmd == 'S') {
++        // Status of the running RAM program: brief halt, read mailbox + DPC, resume.
++        bool h = halt_target();
++        uint32_t e, m0 = mem_rd(0x20000300, e), m1 = mem_rd(0x20000304, e), m2 = mem_rd(0x20000308, e), m3 = mem_rd(0x2000030C, e);
++        swio->put(0x16, 0x700); swio->put(0x17, (2u << 20) | (1u << 17) | 0x7B1);
++        abs_wait();
++        uint32_t dpc = swio->get(0x04);
++        uint32_t st = swio->get(0x11);
++        bool r = resume_target();
++        snprintf(line, sizeof(line), "STAT h%d m0 %08lx pin %03lx prof %08lx beat %lu dpc %08lx dms %08lx r%d\r\n", h,
++                 (unsigned long)m0, (unsigned long)m1, (unsigned long)m2, (unsigned long)m3, (unsigned long)dpc, (unsigned long)st, r);
++        say(line);
++        say("END\r\n");
++        continue;
++      }
++      gpio_init(PIN_SWIO);
++      gpio_set_dir(PIN_SWIO, GPIO_IN);
++      gpio_disable_pulls(PIN_SWIO);
++      sleep_ms(2);
++      int idle = gpio_get(PIN_SWIO);
++      snprintf(line, sizeof(line), "IDLE_LEVEL %d\r\n", idle);
++      say(line);
++      swio->reset(PIN_SWIO);
++      const struct { const char* name; uint32_t addr; } regs[] = {
++        {"DMCONTROL", 0x10}, {"DMSTATUS", 0x11}, {"HARTINFO", 0x12},
++        {"ABSTRACTCS", 0x16}, {"CPBR", 0x7C}, {"PART", 0x7F},
++      };
++      for (int pass = 0; pass < 2; pass++) {
++        for (auto& r : regs) {
++          snprintf(line, sizeof(line), "P%d %-10s 0x%08lx\r\n", pass, r.name, (unsigned long)swio->get(r.addr));
++          say(line);
++        }
++      }
++      if (cmd == 'i') {
++        // Halt (with a timeout instead of picorvd's endless loop), read IDs + flash start, resume.
++        swio->put(0x10, 0x10000001);             // ack havereset so resume is allowed later
++        swio->put(0x10, 0x80000001);             // haltreq
++        bool halted = false;
++        for (int i = 0; i < 200 && !halted; i++) halted = (swio->get(0x11) >> 9) & 1;
++        swio->put(0x10, 0x00000001);
++        snprintf(line, sizeof(line), "HALTED %d DMSTATUS 0x%08lx\r\n", halted, (unsigned long)swio->get(0x11));
++        say(line);
++        if (halted) {
++          const struct { const char* name; uint32_t addr; } mem[] = {
++            {"FLASH@08000000", 0x08000000}, {"FLASH@08000004", 0x08000004},
++            {"FLASH@08000008", 0x08000008}, {"FLASH@0800000C", 0x0800000C},
++            {"FLASH@00000000", 0x00000000},
++            {"FLASH_OBR", 0x4002201C}, {"FLASH_WPR", 0x40022020},
++            {"OPT@1FFFF800", 0x1FFFF800}, {"OPT@1FFFF804", 0x1FFFF804},
++            {"ID@1FFFF7C4", 0x1FFFF7C4}, {"ID@1FFFF704", 0x1FFFF704},
++            {"FLACAP@1FFFF7E0", 0x1FFFF7E0}, {"UID@1FFFF7E8", 0x1FFFF7E8},
++            {"UID@1FFFF7EC", 0x1FFFF7EC}, {"UID@1FFFF7F0", 0x1FFFF7F0},
++          };
++          for (auto& m : mem) {
++            uint32_t v = rvd->get_mem_u32(m.addr);
++            uint32_t err = (swio->get(0x16) >> 8) & 7;   // ABSTRACTCS.CMDERR: nonzero = read failed
++            if (err) swio->put(0x16, 0x00000700);
++            snprintf(line, sizeof(line), "%-16s 0x%08lx%s\r\n", m.name, (unsigned long)v, err ? " (READ ERROR)" : "");
++            say(line);
++          }
++          bool ok = rvd->resume();
++          snprintf(line, sizeof(line), "RESUMED %d DMSTATUS 0x%08lx\r\n", ok, (unsigned long)swio->get(0x11));
++          say(line);
++        }
++      }
++      if (cmd == 'd') {
++        // Diagnose why memory reads fail: try 4 access methods, report ABSTRACTCS.CMDERR for each.
++        // Raw DM regs: DATA0 04, DATA1 05, DMCONTROL 10, DMSTATUS 11, ABSTRACTCS 16, COMMAND 17,
++        // PROGBUF0 20, PROGBUF1 21, SBCS 38, SBADDRESS0 39, SBDATA0 3C.
++        auto clr = [&]() { swio->put(0x16, 0x00000700); };
++        auto err = [&]() { return (unsigned long)((swio->get(0x16) >> 8) & 7); };
++        swio->put(0x10, 0x80000001);
++        bool halted = false;
++        for (int i = 0; i < 200 && !halted; i++) halted = (swio->get(0x11) >> 9) & 1;
++        swio->put(0x10, 0x00000001);
++        snprintf(line, sizeof(line), "HALTED %d SBCS 0x%08lx\r\n", halted, (unsigned long)swio->get(0x38));
++        say(line);
++        const uint32_t addrs[] = {0x08000000, 0x00000000, 0x1FFFF7C4, 0x1FFFF704, 0x1FFFF800, 0x4002201C, 0x20000000};
++        // A: abstract register reads (s0 = x8, dpc CSR 0x7b1)
++        const uint32_t regnos[] = {0x1008, 0x07b1};
++        for (auto rn : regnos) {
++          clr(); swio->put(0x17, (2u << 20) | (1u << 17) | rn);
++          snprintf(line, sizeof(line), "A reg 0x%04lx = 0x%08lx err %lu\r\n", (unsigned long)rn, (unsigned long)swio->get(0x04), err());
++          say(line);
++        }
++        for (auto a : addrs) {
++          // B: abstract access-memory command (cmdtype 2, 32-bit)
++          clr(); swio->put(0x05, a); swio->put(0x17, (2u << 24) | (2u << 20));
++          snprintf(line, sizeof(line), "B mem  0x%08lx = 0x%08lx err %lu\r\n", (unsigned long)a, (unsigned long)swio->get(0x04), err());
++          say(line);
++          // C: progbuf "lw a0,0(a1); ebreak", a1 written / a0 read via abstract register access
++          clr();
++          swio->put(0x20, 0x0005A503); swio->put(0x21, 0x00100073);
++          swio->put(0x04, a); swio->put(0x17, (2u << 20) | (1u << 17) | (1u << 16) | 0x100B);
++          unsigned long e1 = err();
++          swio->put(0x17, (1u << 18));
++          unsigned long e2 = err();
++          swio->put(0x17, (2u << 20) | (1u << 17) | 0x100A);
++          snprintf(line, sizeof(line), "C prog 0x%08lx = 0x%08lx err %lu/%lu/%lu\r\n", (unsigned long)a, (unsigned long)swio->get(0x04), e1, e2, err());
++          say(line);
++          // D: system bus access (32-bit, read on address write)
++          swio->put(0x38, (2u << 17) | (1u << 20) | (7u << 12));
++          swio->put(0x39, a);
++          uint32_t sbd = swio->get(0x3C);
++          snprintf(line, sizeof(line), "D sba  0x%08lx = 0x%08lx sbcs 0x%08lx\r\n", (unsigned long)a, (unsigned long)sbd, (unsigned long)swio->get(0x38));
++          say(line);
++        }
++        clr();
++      }
++      if (cmd == 'c') {
++        // Identify the chip: CPU CSRs via abstract register reads, then ID/config words via
++        // abstract memory reads, waiting for BUSY to clear (an earlier read returned busy).
++        auto clr = [&]() { swio->put(0x16, 0x00000700); };
++        auto wait = [&]() { uint32_t a = 0; for (int i = 0; i < 100; i++) { a = swio->get(0x16); if (!((a >> 12) & 1)) break; } return (unsigned long)((a >> 8) & 7); };
++        swio->put(0x10, 0x80000001);
++        bool halted = false;
++        for (int i = 0; i < 200 && !halted; i++) halted = (swio->get(0x11) >> 9) & 1;
++        swio->put(0x10, 0x00000001);
++        snprintf(line, sizeof(line), "HALTED %d\r\n", halted);
++        say(line);
++        const struct { const char* name; uint32_t csr; } csrs[] = {
++          {"misa", 0x301}, {"mvendorid", 0xF11}, {"marchid", 0xF12}, {"mimpid", 0xF13},
++          {"mhartid", 0xF14}, {"mtvec", 0x305}, {"mstatus", 0x300}, {"dpc", 0x7B1}, {"dcsr", 0x7B0},
++        };
++        for (auto& c : csrs) {
++          clr(); swio->put(0x17, (2u << 20) | (1u << 17) | c.csr);
++          unsigned long e = wait();
++          snprintf(line, sizeof(line), "CSR %-9s 0x%08lx err %lu\r\n", c.name, (unsigned long)swio->get(0x04), e);
++          say(line);
++        }
++        const uint32_t addrs[] = {
++          0x1FFFF7E0, 0x1FFFF7E4, 0x1FFFF7E8, 0x1FFFF7EC, 0x1FFFF7F0, 0x1FFFF7C4, 0x1FFFF704,
++          0x1FFFF800, 0x1FFFF804, 0x1FFFF808, 0x1FFFF80C,
++          0x40021000, 0x40021004, 0x40021014, 0x40021018, 0x4002101C,   // RCC CTLR/CFGR0/AHBPCENR/APB2PCENR/APB1PCENR
++          0x40010800, 0x40010804, 0x40010C00, 0x40010C04, 0x40011000, 0x40011004,  // GPIOA/B/C CFGLR/CFGHR
++          0x40022000, 0x4002201C, 0xE000F000, 0xE000E000,
++          0x20000000, 0x20000004, 0x20000800, 0x20002000, 0x20004000, 0x20008000, 0x20010000,
++        };
++        for (auto a : addrs) {
++          clr(); swio->put(0x05, a); swio->put(0x17, (2u << 24) | (2u << 20));
++          unsigned long e = wait();
++          snprintf(line, sizeof(line), "MEM 0x%08lx = 0x%08lx err %lu\r\n", (unsigned long)a, (unsigned long)swio->get(0x04), e);
++          say(line);
++        }
++        clr();
++      }
++      if (cmd == 'm') {
++        // Full read-only dump: halt, read every word of each range via abstract memory access,
++        // print "W addr data err" lines (8 words/line), give up on a range after 16 errors in a row.
++        auto clr = [&]() { swio->put(0x16, 0x00000700); };
++        auto rd = [&](uint32_t a, unsigned long& e) {
++          clr(); swio->put(0x05, a); swio->put(0x17, (2u << 24) | (2u << 20));
++          uint32_t s = 0; for (int i = 0; i < 100; i++) { s = swio->get(0x16); if (!((s >> 12) & 1)) break; }
++          e = (s >> 8) & 7; return swio->get(0x04);
++        };
++        swio->put(0x10, 0x80000001);
++        bool halted = false;
++        for (int i = 0; i < 200 && !halted; i++) halted = (swio->get(0x11) >> 9) & 1;
++        swio->put(0x10, 0x00000001);
++        snprintf(line, sizeof(line), "HALTED %d\r\n", halted);
++        say(line);
++        const struct { const char* name; uint32_t start, end; } ranges[] = {
++          {"FLASH",   0x00000000, 0x00000040}, {"FLASH8", 0x08000000, 0x08000040},
++          {"SYSBOOT", 0x1FFFF000, 0x1FFFF800}, {"OPT_ESIG", 0x1FFFF800, 0x1FFFF900},
++          {"ESIG7",   0x1FFFF700, 0x1FFFF800},
++          {"RAM",     0x20000000, 0x20002000},
++          {"PWR",     0x40007000, 0x40007010}, {"AFIO", 0x40010000, 0x40010020},
++          {"GPIOA",   0x40010800, 0x40010820}, {"GPIOB", 0x40010C00, 0x40010C20},
++          {"GPIOC",   0x40011000, 0x40011020}, {"GPIOD", 0x40011400, 0x40011420},
++          {"ADC",     0x40012400, 0x40012450}, {"TIM1", 0x40012C00, 0x40012C50},
++          {"SPI1",    0x40013000, 0x40013020}, {"USART1", 0x40013800, 0x4001381C},
++          {"TIM2",    0x40000000, 0x40000050}, {"I2C1", 0x40005400, 0x40005424},
++          {"USART2",  0x40004400, 0x4000441C}, {"DMA",  0x40020000, 0x40020090},
++          {"RCC",     0x40021000, 0x40021030}, {"FLASHCTL", 0x40022000, 0x40022030},
++          {"EXTI",    0x40010400, 0x40010418}, {"PFIC", 0xE000E000, 0xE000E100},
++          {"PFIC_VT", 0xE000E400, 0xE000E480}, {"STK", 0xE000F000, 0xE000F020},
++        };
++        for (auto& r : ranges) {
++          snprintf(line, sizeof(line), "RANGE %s %08lx %08lx\r\n", r.name, (unsigned long)r.start, (unsigned long)r.end);
++          say(line);
++          int bad = 0;
++          for (uint32_t a = r.start; a < r.end; a += 32) {
++            int n = snprintf(line, sizeof(line), "W %08lx", (unsigned long)a);
++            unsigned long errs = 0;
++            for (uint32_t k = 0; k < 8 && a + 4 * k < r.end; k++) {
++              unsigned long e; uint32_t v = rd(a + 4 * k, e);
++              if (e) { errs |= 1u << k; bad++; } else bad = 0;
++              n += snprintf(line + n, sizeof(line) - n, " %08lx", (unsigned long)v);
++            }
++            snprintf(line + n, sizeof(line) - n, " E%02lx\r\n", errs);
++            say(line);
++            if (bad >= 16) { say("SKIP\r\n"); break; }
++          }
++        }
++        clr();
++      }
++      if (cmd == 'd' || cmd == 'r' || cmd == 'c' || cmd == 'm') {
++        // Resume with a plain resumereq (picorvd's resume() refuses while havereset is set).
++        swio->put(0x10, 0x10000001);
++        swio->put(0x10, 0x40000001);
++        bool ack = false;
++        for (int i = 0; i < 200 && !ack; i++) ack = (swio->get(0x11) >> 17) & 1;
++        swio->put(0x10, 0x00000001);
++        snprintf(line, sizeof(line), "RESUMEACK %d DMSTATUS 0x%08lx\r\n", ack, (unsigned long)swio->get(0x11));
++        say(line);
++      }
++      say("END\r\n");
++    }
++    continue;
++
+     //----------------------------------------
+     // Update GDB stub
+ 
