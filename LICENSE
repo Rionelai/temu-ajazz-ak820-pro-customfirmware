@@ -1,6 +1,6 @@
 MIT License
 
-Copyright (c) 2026 Rionela
+Copyright (c) 2026 the ajazz-ak820pro-ch584-revive contributors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -19,3 +19,13 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+-------------------------------------------------------------------------------
+Exception: files derived from the WCH (Nanjing Qinheng Microelectronics) CH585 EVT
+SDK keep their original WCH copyright and terms ("used for microcontroller
+manufactured by Nanjing Qinheng Microelectronics"):
+  firmware/common/startup.S, firmware/common/link_ch584.ld,
+  firmware/common/inc/core_riscv.h, firmware/common/usb_cdc.c,
+  firmware/keyboard/usb_hid.c
+research/u8-probe/picorvd-probe.patch is a patch against aappleby/picorvd and
+follows that project's license.
