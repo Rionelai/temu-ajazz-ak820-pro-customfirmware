@@ -1,0 +1,13 @@
+Credits
+
+Rionela - hardware work: opening the keyboard, soldering, removing the factory
+          solder bridge, wiring the Pi Pico, testing every step on the real board.
+
+Contributed by Claude (Anthropic, Claude Code) - firmware, tools and research:
+  - U7 (CH584) keyboard firmware: key matrix, knob, USB + Bluetooth HID, RGB,
+    IAP updater (update without opening the keyboard)
+  - U8 (CH32V006) unlock, bootloader and screen firmware (presets, Georgian clock,
+    image/GIF playback), U7 <-> U8 one-wire link
+  - WebHID settings page (web/settings.html)
+
+Revived a keyboard that was bricked by the official 2.4G upgrade tool.
