@@ -28,10 +28,15 @@ What we found:
 |---|---|
 | Recovery path (bootloader + flashing) | ✅ works |
 | Key finder firmware (maps keys over a USB serial port) | ✅ works |
-| Replacement firmware: keys over USB, knob = volume, knob press = mute | 🚧 builds; keymap being mapped |
-| Snap Tap (SOCD) on A/D, Fn+S toggles | 🚧 in v1, untested |
-| Web settings page (WebHID) | planned |
-| RGB lighting, Bluetooth, screen, 2.4G dongle | planned |
+| Replacement firmware: all 82 keys mapped, knob = volume, knob press = mute, Fn layer | ✅ works |
+| Updates without opening the keyboard (own IAP updater: hold Esc while plugging in) | ✅ works |
+| RGB lighting (effects, colours, brightness, saved settings) | ✅ works |
+| Bluetooth (pairs and types, knob, battery level) | ✅ works |
+| Web settings page (WebHID, one HTML file, USB + Bluetooth) | ✅ works |
+| Screen (U8): presets, Georgian clock with battery %, own images | ✅ works |
+| Screen: own GIFs | 🚧 not working yet |
+| Snap Tap (SOCD) | ❌ not planned (can get you banned in CS2) |
+| 2.4G dongle | planned |
 
 ## Quick start
 
@@ -64,6 +69,7 @@ research/
 
 ## Credits
 
+- Firmware, tools and settings page written together with Claude (Anthropic) - see [CREDITS.txt](CREDITS.txt)
 - [fpb/ajazz-ak820-pro](https://github.com/fpb/ajazz-ak820-pro) - the older SN32 board, where this started
 - [ch32-rs/wchisp](https://github.com/ch32-rs/wchisp), [openwch/ch585](https://github.com/openwch/ch585),
   [aappleby/picorvd](https://github.com/aappleby/picorvd)
